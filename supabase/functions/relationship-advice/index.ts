@@ -3,6 +3,7 @@ import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
 type AdviceRequest = {
@@ -10,34 +11,66 @@ type AdviceRequest = {
   locale?: string;
 };
 
+type OpenAIChoice = {
+  message?: {
+    content?: string;
+  };
+};
+
+type OpenAIResponse = {
+  choices?: OpenAIChoice[];
+  error?: {
+    message?: string;
+    type?: string;
+  };
+};
+
+const jsonHeaders = { ...corsHeaders, 'Content-Type': 'application/json' };
+
+const jsonResponse = (status: number, body: Record<string, unknown>) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: jsonHeaders,
+  });
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
-  try {
-    const { message, locale = 'pt' } = (await req.json()) as AdviceRequest;
+  if (req.method !== 'POST') {
+    return jsonResponse(405, { error: 'Method not allowed. Use POST.' });
+  }
 
-    if (!message || message.trim().length < 12) {
-      return new Response(JSON.stringify({ error: 'Message must contain at least 12 characters.' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+  try {
+    let requestBody: AdviceRequest;
+    try {
+      requestBody = (await req.json()) as AdviceRequest;
+    } catch {
+      return jsonResponse(400, { error: 'Invalid JSON payload.' });
+    }
+
+    const { message, locale = 'pt' } = requestBody;
+    const normalizedMessage = message?.trim();
+
+    if (!normalizedMessage || normalizedMessage.length < 12) {
+      return jsonResponse(400, { error: 'Message must contain at least 12 characters.' });
     }
 
     const openAiApiKey = Deno.env.get('OPENAI_API_KEY');
+    const openAiModel = Deno.env.get('OPENAI_MODEL') ?? 'gpt-4o-mini';
 
     if (!openAiApiKey) {
-      return new Response(JSON.stringify({ error: 'OPENAI_API_KEY is not configured.' }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return jsonResponse(500, { error: 'OPENAI_API_KEY is not configured.' });
     }
 
     const systemPrompt =
-      locale.startsWith('en')
+      locale.toLowerCase().startsWith('en')
         ? 'You are a relationship coach. Reply with one practical, empathetic suggestion in up to 90 words.'
         : 'Você é um coach de relacionamento. Responda com uma sugestão prática e empática em até 90 palavras.';
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -46,40 +79,35 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: openAiModel,
         temperature: 0.7,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: message.trim() },
+          { role: 'user', content: normalizedMessage },
         ],
       }),
-    });
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+
+    const payload = (await response.json().catch(() => ({}))) as OpenAIResponse;
 
     if (!response.ok) {
-      const details = await response.text();
-      return new Response(JSON.stringify({ error: 'AI provider request failed.', details }), {
-        status: 502,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      return jsonResponse(502, {
+        error: 'AI provider request failed.',
+        details: payload.error?.message ?? `HTTP ${response.status}`,
+        type: payload.error?.type,
       });
     }
 
-    const payload = await response.json();
-    const suggestion = payload?.choices?.[0]?.message?.content?.trim();
+    const suggestion = payload.choices?.[0]?.message?.content?.trim();
 
     if (!suggestion) {
-      return new Response(JSON.stringify({ error: 'AI provider returned an empty suggestion.' }), {
-        status: 502,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      return jsonResponse(502, { error: 'AI provider returned an empty suggestion.' });
     }
 
-    return new Response(JSON.stringify({ suggestion }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return jsonResponse(200, { suggestion });
   } catch (error) {
-    return new Response(JSON.stringify({ error: (error as Error).message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    const message = error instanceof Error ? error.message : 'Unexpected error.';
+    return jsonResponse(500, { error: message });
   }
 });
