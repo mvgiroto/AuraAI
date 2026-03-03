@@ -3,12 +3,9 @@ import { Session } from '@supabase/supabase-js';
 import { useTranslation } from 'react-i18next';
 import { AuthForm } from './components/AuthForm';
 import { Dashboard, Insight } from './components/Dashboard';
-import { Profile } from './components/Profile';
 import { supabase } from './lib/supabase';
 
 const EDGE_FUNCTION_NAME = 'relationship-advice';
-
-type Tab = 'dashboard' | 'profile';
 
 function generateFallbackSuggestion(message: string, language: string): string {
   const lower = message.toLowerCase();
@@ -44,7 +41,6 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
 
   useEffect(() => {
     const init = async () => {
@@ -136,9 +132,7 @@ export default function App() {
     }
 
     if (data.user) {
-      const { error: profileSaveError } = await supabase
-        .from('profiles')
-        .upsert({ id: data.user.id, name, email });
+      const { error: profileSaveError } = await supabase.from('profiles').upsert({ id: data.user.id, name, email });
 
       if (profileSaveError) {
         setError(t('profileSaveError'));
@@ -153,30 +147,6 @@ export default function App() {
     await supabase.auth.signOut();
   };
 
-  const handleSaveProfile = async (name: string) => {
-    if (!session?.user) return;
-
-    setLoading(true);
-    setError(null);
-    setInfo(null);
-
-    const { error: profileSaveError } = await supabase
-      .from('profiles')
-      .upsert({ id: session.user.id, name, email: session.user.email });
-
-    if (profileSaveError) {
-      setError(t('profileSaveError'));
-    } else {
-      setProfile((current) => ({
-        name,
-        email: current?.email ?? session.user.email,
-      }));
-      setInfo(t('profileSaved'));
-    }
-
-    setLoading(false);
-  };
-
   const getSuggestion = async (message: string): Promise<{ suggestion: string; fallback: boolean }> => {
     const { data, error: functionError } = await supabase.functions.invoke(EDGE_FUNCTION_NAME, {
       body: {
@@ -185,8 +155,10 @@ export default function App() {
       },
     });
 
-    if (!functionError && data?.suggestion) {
-      return { suggestion: String(data.suggestion), fallback: false };
+    const edgeSuggestion = data && typeof data === 'object' ? (data as { suggestion?: string; error?: string }).suggestion : undefined;
+
+    if (!functionError && edgeSuggestion) {
+      return { suggestion: String(edgeSuggestion), fallback: false };
     }
 
     return {
@@ -227,62 +199,52 @@ export default function App() {
   };
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">AuraAI</div>
-        <button className={`menu-item ${activeTab === 'dashboard' ? 'menu-item-active' : ''}`} type="button" onClick={() => setActiveTab('dashboard')}>
-          {t('dashboardTab')}
-        </button>
-        <button className={`menu-item ${activeTab === 'profile' ? 'menu-item-active' : ''}`} type="button" onClick={() => setActiveTab('profile')}>
-          {t('profileTab')}
-        </button>
+    <main className="layout">
+      <header className="app-topbar">
+        <div className="brand-left">
+          <div className="brand-icon">G</div>
+          <strong>GaliChat</strong>
+        </div>
+        <nav>
+          <span>💬 My Chatbots</span>
+          <span>★ Become a partner</span>
+          <span>◉ Billing</span>
+          <span>◉ Account</span>
+        </nav>
+      </header>
+
+      <aside className="left-sidebar">
+        <button className="side-link" type="button">My Chatbots</button>
+        <button className="side-link" type="button">View Chatbot</button>
+        <button className="side-link" type="button">Analytics</button>
+        <button className="side-link" type="button">Messages</button>
+        <button className="side-link" type="button">Leads</button>
+        <hr />
+        <button className="side-link" type="button">Training sources</button>
+        <button className="side-link side-link-active" type="button">Visual Look</button>
+        <button className="side-link" type="button">Embeded on site</button>
+        <button className="side-link" type="button">Add-ons</button>
+        <button className="side-link" type="button">Settings</button>
+        <hr />
+        <button className="side-link" type="button">Integrations - soon</button>
       </aside>
 
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <h1>{t('appTitle')}</h1>
-            <p>{t('subtitle')}</p>
-          </div>
-          <label className="language-switcher">
-            {t('switchLanguage')}
-            <select value={i18n.language} onChange={(event) => void i18n.changeLanguage(event.target.value)}>
-              <option value="pt">Português</option>
-              <option value="en">English</option>
-            </select>
-          </label>
-        </header>
-
-        <div className="content-card">
-          {!session ? (
+      <section className="main-content">
+        {!session ? (
+          <div className="content-card">
             <AuthForm onLogin={handleLogin} onSignup={handleSignup} loading={loading} error={error} info={info} />
-          ) : (
-            <>
-              {activeTab === 'dashboard' ? (
-                <Dashboard
-                  name={userName}
-                  onLogout={handleLogout}
-                  onAnalyze={handleAnalyze}
-                  insights={insights}
-                  loading={loading}
-                  error={error}
-                  info={info}
-                />
-              ) : (
-                <Profile
-                  email={session.user.email ?? ''}
-                  initialName={profile?.name ?? ''}
-                  onSave={handleSaveProfile}
-                  loading={loading}
-                />
-              )}
-
-              {activeTab === 'profile' && (error || info) && (
-                <p className={error ? 'error' : 'info'}>{error ?? info}</p>
-              )}
-            </>
-          )}
-        </div>
+          </div>
+        ) : (
+          <Dashboard
+            name={userName}
+            onLogout={handleLogout}
+            onAnalyze={handleAnalyze}
+            insights={insights}
+            loading={loading}
+            error={error}
+            info={info}
+          />
+        )}
       </section>
     </main>
   );
