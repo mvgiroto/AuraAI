@@ -6,6 +6,7 @@ Aplicativo fullstack (frontend React + TypeScript e backend Supabase) para apoia
 
 - Login e cadastro com **Supabase Auth** (email/senha).
 - Dashboard com histórico de análises de relacionamento por usuário.
+- Área de perfil para atualizar nome do usuário logado.
 - Interface moderna e responsiva com foco em UX.
 - Suporte completo a **Português** e **English**.
 - Persistência em tabelas do Supabase com RLS.
@@ -105,9 +106,33 @@ with check (auth.uid() = user_id);
 
 > Observação: o app grava perfil (`profiles`) após cadastro e grava histórico em `relationship_insights`.
 
-### 2.4 (Opcional) IA real com Edge Function
+### 2.4 IA real com Edge Function
 
-O app tenta chamar a função `relationship-advice`. Se não existir, usa fallback local.
+A função já está incluída em `supabase/functions/relationship-advice/index.ts` e usa a API da OpenAI.
+
+1. Faça login no Supabase CLI:
+
+```bash
+supabase login
+```
+
+2. Configure o segredo da função:
+
+```bash
+supabase secrets set OPENAI_API_KEY="sua-chave"
+```
+
+3. Deploy da função:
+
+```bash
+supabase functions deploy relationship-advice
+```
+
+4. (Opcional) Teste local:
+
+```bash
+supabase functions serve relationship-advice --no-verify-jwt
+```
 
 Exemplo de payload esperado:
 
@@ -146,12 +171,13 @@ Aplicação: `http://localhost:4173`
 
 - `src/App.tsx`: fluxo de autenticação, dashboard, integração Supabase e fallback/Edge Function de IA.
 - `src/components/AuthForm.tsx`: tela de login/cadastro com validações.
-- `src/components/Dashboard.tsx`: área logada para análises e histórico.
+- `src/components/Dashboard.tsx`: aba de dashboard para análises e histórico.
+- `src/components/Profile.tsx`: aba de perfil para editar o nome.
 - `src/i18n.ts`: traduções pt/en.
 - `src/lib/supabase.ts`: cliente Supabase.
 
 ## 5) Próximos passos recomendados
 
-- Criar Edge Function com um provedor LLM (OpenAI, Anthropic, etc).
+- Adicionar streaming de resposta da IA para feedback em tempo real.
 - Adicionar recuperação de senha e confirmação de email customizada.
 - Criar testes E2E para autenticação e fluxo de insights.

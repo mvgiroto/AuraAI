@@ -3,9 +3,12 @@ import { Session } from '@supabase/supabase-js';
 import { useTranslation } from 'react-i18next';
 import { AuthForm } from './components/AuthForm';
 import { Dashboard, Insight } from './components/Dashboard';
+import { Profile } from './components/Profile';
 import { supabase } from './lib/supabase';
 
 const EDGE_FUNCTION_NAME = 'relationship-advice';
+
+type Tab = 'dashboard' | 'profile';
 
 function generateFallbackSuggestion(message: string, language: string): string {
   const lower = message.toLowerCase();
@@ -28,18 +31,20 @@ function generateFallbackSuggestion(message: string, language: string): string {
     : 'Reservem 15 minutos por dia para diálogo sem celular, focado em sentimentos e necessidades.';
 }
 
-type Profile = {
+type ProfileData = {
   name: string;
+  email?: string;
 };
 
 export default function App() {
   const { t, i18n } = useTranslation();
   const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<ProfileData | null>(null);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
 
   useEffect(() => {
     const init = async () => {
@@ -71,7 +76,7 @@ export default function App() {
       setError(null);
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
-        .select('name')
+        .select('name, email')
         .eq('id', session.user.id)
         .single();
 
@@ -148,6 +153,30 @@ export default function App() {
     await supabase.auth.signOut();
   };
 
+  const handleSaveProfile = async (name: string) => {
+    if (!session?.user) return;
+
+    setLoading(true);
+    setError(null);
+    setInfo(null);
+
+    const { error: profileSaveError } = await supabase
+      .from('profiles')
+      .upsert({ id: session.user.id, name, email: session.user.email });
+
+    if (profileSaveError) {
+      setError(t('profileSaveError'));
+    } else {
+      setProfile((current) => ({
+        name,
+        email: current?.email ?? session.user.email,
+      }));
+      setInfo(t('profileSaved'));
+    }
+
+    setLoading(false);
+  };
+
   const getSuggestion = async (message: string): Promise<{ suggestion: string; fallback: boolean }> => {
     const { data, error: functionError } = await supabase.functions.invoke(EDGE_FUNCTION_NAME, {
       body: {
@@ -198,41 +227,63 @@ export default function App() {
   };
 
   return (
-    <main className="layout">
-      <header className="hero card">
-        <div>
-          <h1>{t('appTitle')}</h1>
-          <p>{t('subtitle')}</p>
-          <small>{t('hintPrivacy')}</small>
-        </div>
-        <label className="language-switcher">
-          {t('switchLanguage')}
-          <select value={i18n.language} onChange={(event) => void i18n.changeLanguage(event.target.value)}>
-            <option value="pt">Português</option>
-            <option value="en">English</option>
-          </select>
-        </label>
-      </header>
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">AuraAI</div>
+        <button className={`menu-item ${activeTab === 'dashboard' ? 'menu-item-active' : ''}`} type="button" onClick={() => setActiveTab('dashboard')}>
+          {t('dashboardTab')}
+        </button>
+        <button className={`menu-item ${activeTab === 'profile' ? 'menu-item-active' : ''}`} type="button" onClick={() => setActiveTab('profile')}>
+          {t('profileTab')}
+        </button>
+      </aside>
 
-      {!session ? (
-        <AuthForm
-          onLogin={handleLogin}
-          onSignup={handleSignup}
-          loading={loading}
-          error={error}
-          info={info}
-        />
-      ) : (
-        <Dashboard
-          name={String(userName)}
-          onLogout={handleLogout}
-          onAnalyze={handleAnalyze}
-          insights={insights}
-          loading={loading}
-          error={error}
-          info={info}
-        />
-      )}
+      <section className="workspace">
+        <header className="topbar">
+          <div>
+            <h1>{t('appTitle')}</h1>
+            <p>{t('subtitle')}</p>
+          </div>
+          <label className="language-switcher">
+            {t('switchLanguage')}
+            <select value={i18n.language} onChange={(event) => void i18n.changeLanguage(event.target.value)}>
+              <option value="pt">Português</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+        </header>
+
+        <div className="content-card">
+          {!session ? (
+            <AuthForm onLogin={handleLogin} onSignup={handleSignup} loading={loading} error={error} info={info} />
+          ) : (
+            <>
+              {activeTab === 'dashboard' ? (
+                <Dashboard
+                  name={userName}
+                  onLogout={handleLogout}
+                  onAnalyze={handleAnalyze}
+                  insights={insights}
+                  loading={loading}
+                  error={error}
+                  info={info}
+                />
+              ) : (
+                <Profile
+                  email={session.user.email ?? ''}
+                  initialName={profile?.name ?? ''}
+                  onSave={handleSaveProfile}
+                  loading={loading}
+                />
+              )}
+
+              {activeTab === 'profile' && (error || info) && (
+                <p className={error ? 'error' : 'info'}>{error ?? info}</p>
+              )}
+            </>
+          )}
+        </div>
+      </section>
     </main>
   );
 }
